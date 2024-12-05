@@ -31,6 +31,7 @@ class DRLAgent:
         if isinstance(env, DummyVecEnv):
             self.env = env
         else:
+            # Wrap the environment with DummyVecEnv for Gymnasium compatibility
             self.env = DummyVecEnv([lambda: env])
         
         if model_path:
@@ -57,18 +58,22 @@ class DRLAgent:
                 "policy_kwargs": dict(
                     net_arch=dict(
                         pi=[64, 64],
-                        vf=[256, 128, 64]
-                    ),
-                    activation_fn=nn.ReLU
+                        vf=[64, 64]
+                    )
                 ),
-                "verbose": 0  # Set to 0 to use custom progress bar
+                "verbose": 0
             }
             
             # Update with custom parameters if provided
             if train_params:
                 default_params.update(train_params)
             
-            self.model = PPO("MlpPolicy", self.env, **default_params)
+            # Create PPO model with Gymnasium environment
+            self.model = PPO(
+                "MlpPolicy",
+                self.env,
+                **default_params
+            )
     
     def train(self, total_timesteps: int = 100000) -> None:
         """Train the agent with rich progress display

@@ -4,6 +4,11 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 import os
 from datetime import datetime
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+import gymnasium as gym
 
 from rl_env.forex_env import ForexTradingEnv
 
@@ -65,49 +70,93 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 def evaluate_model(model, env, n_episodes: int = 10):
     """Evaluate the trained model"""
+    console = Console()
     returns = []
     win_rate = 0
     trades = []
     
-    for episode in range(n_episodes):
-        obs, info = env.reset()
-        terminated = False
-        truncated = False
-        total_reward = 0
-        episode_trades = []
+    # Create progress display
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(complete_style="green", finished_style="bright_green"),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        expand=True,
+        refresh_per_second=10
+    ) as progress:
+        # Main task for backtesting progress
+        task = progress.add_task(
+            "[cyan]Backtesting Progress", 
+            total=n_episodes,
+            start=True
+        )
         
-        while not (terminated or truncated):
-            action, _ = model.predict(obs)
-            obs, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
+        for episode in range(n_episodes):
+            obs, info = env.reset()  
+            terminated = False
+            truncated = False
+            total_reward = 0
+            episode_trades = []
             
-            if 'trade_info' in info:
-                episode_trades.append(info['trade_info'])
-        
-        returns.append(total_reward)
-        if total_reward > 0:
-            win_rate += 1
-        trades.extend(episode_trades)
+            while not (terminated or truncated):
+                action, _ = model.predict(obs)
+                obs, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
+                
+                if 'trade_info' in info:
+                    episode_trades.append(info['trade_info'])
+            
+            returns.append(total_reward)
+            if total_reward > 0:
+                win_rate += 1
+            trades.extend(episode_trades)
+            
+            # Update progress
+            progress.update(task, advance=1)
     
     win_rate = win_rate / n_episodes * 100
     
-    # Print evaluation results
-    print(f"\nEvaluation over {n_episodes} episodes:")
-    print(f"Average return: {np.mean(returns):.2f}")
-    print(f"Win rate: {win_rate:.2f}%")
-    print(f"Standard deviation: {np.std(returns):.2f}")
+    # Create evaluation results table
+    table = Table(title="[bold]Backtesting Results", show_header=False, 
+                 title_style="yellow", border_style="bright_black")
+    table.add_column("Metric", style="bright_white")
+    table.add_column("Value", style="bright_cyan")
     
-    # Create trades DataFrame
+    table.add_row("Number of Episodes", str(n_episodes))
+    table.add_row("Average Return", f"{np.mean(returns):.2f}")
+    table.add_row("Win Rate", f"{win_rate:.2f}%")
+    table.add_row("Standard Deviation", f"{np.std(returns):.2f}")
+    
+    console.print("\n")
+    console.print(table)
+    
+    # Create trades DataFrame and analyze results
     if trades:
         trades_df = pd.DataFrame(trades)
-        trades_df.to_csv(f"backtest_report/trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-        print(f"\nTrade statistics:")
-        print(f"Total trades: {len(trades_df)}")
-        print(f"Win rate: {(trades_df['pnl'] > 0).mean():.2%}")
-        print(f"Average profit: ${trades_df[trades_df['pnl'] > 0]['pnl'].mean():.2f}")
-        print(f"Average loss: ${trades_df[trades_df['pnl'] < 0]['pnl'].mean():.2f}")
-        print(f"Profit factor: {abs(trades_df[trades_df['pnl'] > 0]['pnl'].sum() / trades_df[trades_df['pnl'] < 0]['pnl'].sum()):.2f}")
-        print(f"Max drawdown: ${trades_df['pnl'].cumsum().min():.2f}")
+        
+        # Create trade statistics table
+        trade_table = Table(title="[bold]Trade Statistics", show_header=False,
+                          title_style="yellow", border_style="bright_black")
+        trade_table.add_column("Metric", style="bright_white")
+        trade_table.add_column("Value", style="bright_cyan")
+        
+        trade_table.add_row("Total Trades", str(len(trades_df)))
+        trade_table.add_row("Win Rate", f"{(trades_df['pnl'] > 0).mean():.2%}")
+        trade_table.add_row("Average Profit", f"${trades_df[trades_df['pnl'] > 0]['pnl'].mean():.2f}")
+        trade_table.add_row("Average Loss", f"${trades_df[trades_df['pnl'] < 0]['pnl'].mean():.2f}")
+        trade_table.add_row("Profit Factor", 
+            f"{abs(trades_df[trades_df['pnl'] > 0]['pnl'].sum() / trades_df[trades_df['pnl'] < 0]['pnl'].sum()):.2f}")
+        trade_table.add_row("Max Drawdown", f"${trades_df['pnl'].cumsum().min():.2f}")
+        
+        console.print("\n")
+        console.print(trade_table)
+        
+        # Save report
+        report_path = f"backtest_report/trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        trades_df.to_csv(report_path)
+        console.print(f"\n[green]Detailed trade report saved to:[/green] {report_path}")
 
 def main():
     # Create directories if they don't exist
@@ -117,30 +166,27 @@ def main():
     data_path = "data/raw/USDJPY_5M_2023.csv"
     df = prepare_data(data_path)
     
-    # Use test data (last 20% of data)
+    # Split data into train and test sets (80/20)
     train_size = int(len(df) * 0.8)
     test_df = df[train_size:]
     
     # Create test environment
-    test_env = DummyVecEnv([lambda: ForexTradingEnv(
+    test_env = ForexTradingEnv(
         df=test_df,
         initial_balance=100.0,
         leverage=1000.0,
         max_daily_drawdown=0.05
-    )])
+    )
     
-    # Load the latest model from rl_models directory
-    models_dir = "rl_models"
-    model_files = [f for f in os.listdir(models_dir) if f.startswith("forex_trading_model_")]
+    # Load the model
+    model_dir = "rl_models"
+    model_files = sorted([f for f in os.listdir(model_dir) if f.endswith('.zip')])
     if not model_files:
-        print("No trained models found!")
-        return
+        raise ValueError("No model files found in rl_models directory")
     
-    latest_model = max(model_files)
-    model_path = os.path.join(models_dir, latest_model)
-    
-    print(f"Loading model from: {model_path}")
-    model = PPO.load(model_path)
+    latest_model = os.path.join(model_dir, model_files[-1])
+    print(f"\nLoading model from: {latest_model}")
+    model = PPO.load(latest_model)
     
     print("\nStarting backtesting...")
     evaluate_model(model, test_env)

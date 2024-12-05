@@ -62,7 +62,9 @@ class ForexTradingEnv(gym.Env):
         self.last_trade_date = None
         self.daily_start_balance = self.initial_balance
         
-        return self._get_observation(), {}  # Return observation and info dict
+        observation = self._get_observation()
+        info = {}
+        return observation, info  # Return observation and info dict
     
     def step(self, action):
         """Execute one time step within the environment"""
