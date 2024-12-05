@@ -62,25 +62,27 @@ def main():
     data_path = "data/raw/USDJPY_5M_2023.csv"
     df = prepare_data(data_path)
     
-    # Check for NaN values
-    print("\nChecking for NaN values:")
-    print(df.isna().sum())
+    # Optional: Enable this for debugging data issues
+    # print("\nChecking for NaN values:")
+    # print(df.isna().sum())
+    # print("\nData info:")
+    # print(df.info())
+    # print("\nFirst few rows:")
+    # print(df.head())
+    # print("\nData statistics:")
+    # print(df.describe())
     
-    # Print data info
-    print("\nData info:")
-    print(df.info())
-    
-    # Print first few rows
-    print("\nFirst few rows:")
-    print(df.head())
-    
-    # Print data statistics
-    print("\nData statistics:")
-    print(df.describe())
+    print(f"Loaded {len(df)} samples from {data_path}")
     
     # Split data into train and test sets (80/20)
     train_size = int(len(df) * 0.8)
     train_df = df[:train_size]
+    
+    print(f"\nTotal samples in training data: {len(train_df)}")
+    
+    # Calculate total_timesteps based on number of samples
+    total_timesteps = len(train_df)  # 1x multiplier
+    print(f"Setting total_timesteps to: {total_timesteps} (1x number of samples)")
     
     # Create training environment
     train_env = ForexTradingEnv(
@@ -97,7 +99,7 @@ def main():
     print("Starting training...")
     agent = train_model(
         env=train_env,
-        total_timesteps=100000,
+        total_timesteps=total_timesteps,
         save_path=model_path
     )
     

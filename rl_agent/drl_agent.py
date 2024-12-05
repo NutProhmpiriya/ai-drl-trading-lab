@@ -3,7 +3,10 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 import torch.nn as nn
-from tqdm import tqdm
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, SpinnerColumn
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 import time
 
 from rl_env.forex_env import ForexTradingEnv
@@ -68,39 +71,109 @@ class DRLAgent:
             self.model = PPO("MlpPolicy", self.env, **default_params)
     
     def train(self, total_timesteps: int = 100000) -> None:
-        """Train the agent with progress bar
+        """Train the agent with rich progress display
         
         Args:
             total_timesteps: Total number of timesteps to train for
         """
-        print("\nTraining Progress:")
-        pbar = tqdm(total=total_timesteps, desc="Training", unit="steps")
+        console = Console()
         
-        # Calculate number of iterations based on n_steps
+        # Print training info in a panel
+        info_text = Text()
+        info_text.append("Training Configuration\n", style="bold cyan")
+        info_text.append(f"Total Timesteps: {total_timesteps:,}\n", style="green")
+        info_text.append(f"Batch Size: {self.model.batch_size}\n", style="yellow")
+        info_text.append(f"Learning Rate: {self.model.learning_rate}\n", style="yellow")
+        info_text.append(f"Gamma: {self.model.gamma}\n", style="yellow")
+        console.print(Panel(info_text, title="[bold]DRL Training", border_style="cyan"))
+        
+        # Calculate number of iterations
         n_steps = self.model.n_steps
         iterations = total_timesteps // n_steps
         steps_per_iter = total_timesteps // iterations
         
-        for i in range(iterations):
-            # Train for steps_per_iter timesteps
-            self.model.learn(total_timesteps=steps_per_iter, reset_num_timesteps=False)
+        # Create progress display
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(complete_style="green", finished_style="bright_green"),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            expand=True,
+            refresh_per_second=10  # Limit refresh rate
+        ) as progress:
+            # Main task for overall progress
+            main_task = progress.add_task(
+                "[cyan]Training Progress", 
+                total=total_timesteps,
+                start=True
+            )
             
-            # Update progress bar
-            pbar.update(steps_per_iter)
+            start_time = time.time()
+            current_timesteps = 0
+            last_print_time = 0  # Track last print time
             
-            # Add training metrics to progress bar description
-            if hasattr(self.model, 'logger') and self.model.logger is not None:
-                metrics = self.model.logger.name_to_value
-                desc = f"Training | "
-                if 'train/approx_kl' in metrics:
-                    desc += f"KL: {metrics['train/approx_kl']:.3f} | "
-                if 'train/loss' in metrics:
-                    desc += f"Loss: {metrics['train/loss']:.3f} | "
-                if 'train/policy_gradient_loss' in metrics:
-                    desc += f"PG Loss: {metrics['train/policy_gradient_loss']:.3f}"
-                pbar.set_description(desc)
-        
-        pbar.close()
+            for i in range(iterations):
+                # Train for steps_per_iter timesteps
+                self.model.learn(total_timesteps=steps_per_iter, reset_num_timesteps=False)
+                current_timesteps += steps_per_iter
+                
+                # Update progress
+                progress.update(main_task, advance=steps_per_iter)
+                
+                # Calculate FPS
+                elapsed_time = time.time() - start_time
+                fps = int(current_timesteps / elapsed_time) if elapsed_time > 0 else 0
+                
+                # Update metrics display (limit update frequency)
+                current_time = time.time()
+                if current_time - last_print_time >= 0.5:  # Update every 0.5 seconds
+                    if hasattr(self.model, 'logger') and self.model.logger is not None:
+                        metrics = self.model.logger.name_to_value
+                        
+                        # Get actual clip range values
+                        if callable(self.model.clip_range):
+                            clip_range = self.model.clip_range(1.0)
+                        else:
+                            clip_range = self.model.clip_range
+                            
+                        if callable(self.model.clip_range_vf):
+                            clip_range_vf = self.model.clip_range_vf(1.0)
+                        else:
+                            clip_range_vf = self.model.clip_range_vf
+                        
+                        # Create metrics string
+                        metrics_str = "\n=== Training Metrics ===\n"
+                        metrics_str += f"FPS: {fps}\n"
+                        metrics_str += f"Iterations: {i+1}\n"
+                        metrics_str += f"Time Elapsed: {int(elapsed_time)}s\n"
+                        metrics_str += f"Total Timesteps: {current_timesteps}\n\n"
+                        
+                        # Training metrics
+                        metrics_str += f"Approx KL: {metrics.get('train/approx_kl', 0):.10f}\n"
+                        metrics_str += f"Clip Fraction: {metrics.get('train/clip_fraction', 0):.4f}\n"
+                        metrics_str += f"Clip Range: {clip_range}\n"
+                        metrics_str += f"Clip Range VF: {clip_range_vf}\n"
+                        metrics_str += f"Entropy Loss: {metrics.get('train/entropy_loss', 0):.3f}\n"
+                        metrics_str += f"Explained Variance: {metrics.get('train/explained_variance', 0):.4f}\n"
+                        metrics_str += f"Learning Rate: {self.model.learning_rate:.0e}\n"
+                        metrics_str += f"Loss: {metrics.get('train/loss', 0):.1f}\n"
+                        metrics_str += f"Updates: {metrics.get('train/n_updates', 0)}\n"
+                        metrics_str += f"Policy Gradient Loss: {metrics.get('train/policy_gradient_loss', 0):.5f}\n"
+                        metrics_str += f"Value Loss: {metrics.get('train/value_loss', 0):.1f}\n"
+                        
+                        # Clear screen and print metrics
+                        console.clear()
+                        progress.refresh()  # Redraw progress bar
+                        console.print(metrics_str)
+                        
+                        last_print_time = current_time
+                
+                time.sleep(0.1)  # Small delay to make display smoother
+            
+            # Print completion message
+            console.print("\n[bold green]Training Complete![/bold green]")
     
     def save(self, save_path: str) -> None:
         """Save the trained model
