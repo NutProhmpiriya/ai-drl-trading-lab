@@ -58,24 +58,26 @@ class ForexTradingEnv(gym.Env):
         self.prev_balance = self.initial_balance
         self.history = []
         return self._get_observation(), {}
-    
+
     def step(self, action):
         # Check if current_step is valid
         if self.current_step >= len(self.df):
-            return self._get_observation(), 0, True, False, {}
+            return self._get_observation(), 0, True, True, {}
 
         current_data = self.df.iloc[self.current_step]
         current_price = current_data['close']
         current_date = pd.to_datetime(current_data.name).date()
         reward = 0
-        done = False
+        terminated = False
+        truncated = False
+        info = {}
         
         # Check for new trading day
         if self.last_trade_date is not None and current_date != self.last_trade_date:
             self.daily_start_balance = self.balance
             # Reset if daily loss exceeds max drawdown
             if (self.balance - self.daily_start_balance) / self.daily_start_balance <= -self.max_daily_drawdown:
-                done = True
+                terminated = True
                 reward = -1
         
         self.last_trade_date = current_date
@@ -98,6 +100,14 @@ class ForexTradingEnv(gym.Env):
                 self.stop_loss = current_price - 1.5 * atr
                 self.take_profit = current_price + 2.5 * atr
                 reward = -current_price * 0.0001  # Transaction cost
+                info['trade_info'] = {
+                    'action': 'buy',
+                    'position_type': 'long',
+                    'entry_price': self.entry_price,
+                    'entry_time': self.df.index[self.current_step],
+                    'stop_loss': self.stop_loss,
+                    'take_profit': self.take_profit
+                }
                 
         elif action == 2:  # Sell
             if self.position >= 0 and not ema_cross and rsi < 60 and not obv_trend:
@@ -106,12 +116,20 @@ class ForexTradingEnv(gym.Env):
                 self.stop_loss = current_price + 1.5 * atr
                 self.take_profit = current_price - 2.5 * atr
                 reward = -current_price * 0.0001
+                info['trade_info'] = {
+                    'action': 'sell',
+                    'position_type': 'short',
+                    'entry_price': self.entry_price,
+                    'entry_time': self.df.index[self.current_step],
+                    'stop_loss': self.stop_loss,
+                    'take_profit': self.take_profit
+                }
         
         # Move to next step and check if we have next data point
         if self.current_step + 1 >= len(self.df):
-            done = True
+            terminated = True
             self.current_step = len(self.df) - 1  # Keep at last valid index
-            return self._get_observation(), reward, done, False, {}
+            return self._get_observation(), reward, terminated, truncated, info
             
         self.current_step += 1
         next_data = self.df.iloc[self.current_step]
@@ -127,9 +145,31 @@ class ForexTradingEnv(gym.Env):
                 if next_price <= self.stop_loss:
                     reward = -1  # Fixed penalty for stop loss
                     self.position = 0
+                    info['trade_info'] = {
+                        'action': 'stop_loss',
+                        'position_type': 'long',
+                        'entry_price': self.entry_price,
+                        'exit_price': next_price,
+                        'pnl': reward,
+                        'entry_time': self.df.index[self.current_step - 1],
+                        'exit_time': self.df.index[self.current_step],
+                        'stop_loss': self.stop_loss,
+                        'take_profit': self.take_profit
+                    }
                 elif next_price >= self.take_profit:
                     reward = 1.5  # Fixed reward for take profit
                     self.position = 0
+                    info['trade_info'] = {
+                        'action': 'take_profit',
+                        'position_type': 'long',
+                        'entry_price': self.entry_price,
+                        'exit_price': next_price,
+                        'pnl': reward,
+                        'entry_time': self.df.index[self.current_step - 1],
+                        'exit_time': self.df.index[self.current_step],
+                        'stop_loss': self.stop_loss,
+                        'take_profit': self.take_profit
+                    }
                     
                 # Update trailing stop if in profit
                 elif (next_price - self.entry_price) >= atr:
@@ -141,22 +181,42 @@ class ForexTradingEnv(gym.Env):
                 if next_price >= self.stop_loss:
                     reward = -1
                     self.position = 0
+                    info['trade_info'] = {
+                        'action': 'stop_loss',
+                        'position_type': 'short',
+                        'entry_price': self.entry_price,
+                        'exit_price': next_price,
+                        'pnl': reward,
+                        'entry_time': self.df.index[self.current_step - 1],
+                        'exit_time': self.df.index[self.current_step],
+                        'stop_loss': self.stop_loss,
+                        'take_profit': self.take_profit
+                    }
                 elif next_price <= self.take_profit:
                     reward = 1.5
                     self.position = 0
+                    info['trade_info'] = {
+                        'action': 'take_profit',
+                        'position_type': 'short',
+                        'entry_price': self.entry_price,
+                        'exit_price': next_price,
+                        'pnl': reward,
+                        'entry_time': self.df.index[self.current_step - 1],
+                        'exit_time': self.df.index[self.current_step],
+                        'stop_loss': self.stop_loss,
+                        'take_profit': self.take_profit
+                    }
                     
                 # Update trailing stop if in profit
                 elif (self.entry_price - next_price) >= atr:
                     new_stop = next_price + atr
                     if new_stop < self.stop_loss:
                         self.stop_loss = new_stop
-                
+            
             # Update balance
             self.balance += reward * risk_amount
-        else:
-            done = True
         
-        return self._get_observation(), reward, done, False, {}
+        return self._get_observation(), reward, terminated, truncated, info
     
     def _calculate_reward(self) -> float:
         """Calculate the reward for the current step"""
