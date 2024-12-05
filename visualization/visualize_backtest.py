@@ -207,6 +207,61 @@ def analyze_trading_performance(trades_df):
         'sharpe_ratio': sharpe_ratio
     }
 
+def analyze_monthly_performance(trades_df):
+    """Analyze trading performance by month"""
+    # Filter completed trades only and convert times
+    completed_trades = trades_df.dropna(subset=['pnl']).copy()
+    completed_trades['exit_time'] = pd.to_datetime(completed_trades['exit_time'])
+    
+    # Add month column
+    completed_trades['month'] = completed_trades['exit_time'].dt.strftime('%Y-%m')
+    
+    # Initialize monthly stats
+    monthly_stats = []
+    
+    for month in sorted(completed_trades['month'].unique()):
+        month_trades = completed_trades[completed_trades['month'] == month]
+        
+        # Buy orders analysis
+        buy_trades = month_trades[month_trades['position_type'] == 'long']
+        buy_total = len(buy_trades)
+        buy_wins = len(buy_trades[buy_trades['pnl'] > 0])
+        buy_win_rate = (buy_wins / buy_total * 100) if buy_total > 0 else 0
+        
+        # Sell orders analysis
+        sell_trades = month_trades[month_trades['position_type'] == 'short']
+        sell_total = len(sell_trades)
+        sell_wins = len(sell_trades[sell_trades['pnl'] > 0])
+        sell_win_rate = (sell_wins / sell_total * 100) if sell_total > 0 else 0
+        
+        # Total analysis
+        total_trades = len(month_trades)
+        total_wins = len(month_trades[month_trades['pnl'] > 0])
+        total_win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
+        total_profit = month_trades['pnl'].sum()
+        
+        monthly_stats.append({
+            'Month': month,
+            'Total Trades': total_trades,
+            'Total Win Rate': f"{total_win_rate:.1f}%",
+            'Total Profit': f"${total_profit:.2f}",
+            'Buy Orders': buy_total,
+            'Buy Wins': buy_wins,
+            'Buy Win Rate': f"{buy_win_rate:.1f}%",
+            'Sell Orders': sell_total,
+            'Sell Wins': sell_wins,
+            'Sell Win Rate': f"{sell_win_rate:.1f}%"
+        })
+    
+    # Convert to DataFrame for better display
+    stats_df = pd.DataFrame(monthly_stats)
+    
+    # Print table
+    print("\n=== Monthly Trading Performance ===")
+    print(stats_df.to_string(index=False))
+    
+    return stats_df
+
 def main():
     # Get the latest trades CSV file from backtest_report directory
     report_dir = "backtest_report"
@@ -225,6 +280,7 @@ def main():
     
     # Analyze trading performance
     performance_metrics = analyze_trading_performance(trades_df)
+    monthly_stats = analyze_monthly_performance(trades_df)
     
     # Create candlestick chart
     output_file = latest_trades.replace('.csv', '.html')
