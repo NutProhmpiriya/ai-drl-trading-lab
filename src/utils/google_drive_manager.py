@@ -142,3 +142,15 @@ class GoogleDriveManager:
         except Exception as e:
             print(f"Error listing files: {e}")
             return []
+
+    def delete_file(self, file_id: str) -> None:
+        """Delete a file from Google Drive.
+        
+        Args:
+            file_id: ID of the file to delete
+        """
+        try:
+            self.service.files().delete(fileId=file_id).execute()
+            print(f"Successfully deleted file with ID: {file_id}")
+        except Exception as e:
+            print(f"Error deleting file: {str(e)}")

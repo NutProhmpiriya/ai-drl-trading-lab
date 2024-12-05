@@ -4,10 +4,11 @@ from utils.google_drive_manager import GoogleDriveManager
 
 def main():
     parser = argparse.ArgumentParser(description='Google Drive File Manager for AI DRL Trading')
-    parser.add_argument('action', choices=['upload', 'download', 'list'], help='Action to perform')
+    parser.add_argument('action', choices=['upload', 'download', 'list', 'delete'], help='Action to perform')
     parser.add_argument('--type', choices=['csv_files', 'models'], help='Type of file (required for upload/list)')
     parser.add_argument('--file', help='Local file path for upload or download')
     parser.add_argument('--file-id', help='Google Drive file ID for download')
+    parser.add_argument('--file_id', help='File ID for deletion')
     
     args = parser.parse_args()
     
@@ -29,6 +30,12 @@ def main():
         if not args.type:
             parser.error("list requires --type argument")
         drive_manager.list_files(args.type)
+    
+    elif args.action == 'delete':
+        if not args.file_id:
+            print("Please provide --file_id for deletion")
+            return
+        drive_manager.delete_file(args.file_id)
 
 if __name__ == '__main__':
     main()
