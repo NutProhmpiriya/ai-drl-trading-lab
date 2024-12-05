@@ -11,18 +11,22 @@ class DRLAgent:
     
     def __init__(
         self,
-        env: ForexTradingEnv,
+        env: Union[ForexTradingEnv, DummyVecEnv],
         model_path: Optional[str] = None,
         train_params: Optional[Dict] = None
     ):
         """Initialize the DRL Agent
         
         Args:
-            env: The forex trading environment
+            env: The forex trading environment (can be vectorized or non-vectorized)
             model_path: Path to a pretrained model (if loading existing model)
             train_params: Training parameters (if training new model)
         """
-        self.env = DummyVecEnv([lambda: env])
+        # Check if environment is already vectorized
+        if isinstance(env, DummyVecEnv):
+            self.env = env
+        else:
+            self.env = DummyVecEnv([lambda: env])
         
         if model_path:
             self.model = PPO.load(model_path, env=self.env)

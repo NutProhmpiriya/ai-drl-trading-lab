@@ -48,48 +48,50 @@ class ForexTradingEnv(gym.Env):
             dtype=np.float32
         )
         
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
+        """Reset the environment to initial state"""
         super().reset(seed=seed)
+        
         self.current_step = 0
+        self.position = 0  # No position
         self.balance = self.initial_balance
-        self.daily_start_balance = self.initial_balance
-        self.position = 0
-        self.last_trade_date = None
         self.prev_balance = self.initial_balance
-        self.history = []
-        return self._get_observation(), {}
-
+        self.entry_price = 0
+        self.stop_loss = 0
+        self.take_profit = 0
+        self.last_trade_date = None
+        self.daily_start_balance = self.initial_balance
+        
+        return self._get_observation(), {}  # Return observation and info dict
+    
     def step(self, action):
-        # Check if current_step is valid
-        if self.current_step >= len(self.df):
-            return self._get_observation(), 0, True, True, {}
-
-        current_data = self.df.iloc[self.current_step]
-        current_price = current_data['close']
-        current_date = pd.to_datetime(current_data.name).date()
-        reward = 0
+        """Execute one time step within the environment"""
+        self.current_step += 1
         terminated = False
         truncated = False
         info = {}
+        reward = 0  # Initialize reward
         
-        # Check for new trading day
-        if self.last_trade_date is not None and current_date != self.last_trade_date:
-            self.daily_start_balance = self.balance
-            # Reset if daily loss exceeds max drawdown
-            if (self.balance - self.daily_start_balance) / self.daily_start_balance <= -self.max_daily_drawdown:
-                terminated = True
-                reward = -1
+        # Get current price data
+        current_price = self.df['close'].iloc[self.current_step]
+        next_price = self.df['close'].iloc[self.current_step + 1] if self.current_step + 1 < len(self.df) else current_price
+        atr = self.df['atr'].iloc[self.current_step]
         
-        self.last_trade_date = current_date
+        # Store previous balance for reward calculation
+        self.prev_balance = self.balance
+        
+        # Check if episode should end (end of data)
+        if self.current_step >= len(self.df) - 1:
+            terminated = True
+            return self._get_observation(), reward, terminated, truncated, info
         
         # Calculate position size based on ATR for risk management
-        atr = current_data['atr']
         risk_amount = self.balance * 0.01  # Risk 1% per trade
         position_size = (risk_amount / atr) * self.leverage
         
         # Entry conditions
-        ema_cross = current_data['ema7'] > current_data['ema21']
-        rsi = current_data['rsi']
+        ema_cross = self.df['ema7'].iloc[self.current_step] > self.df['ema21'].iloc[self.current_step]
+        rsi = self.df['rsi'].iloc[self.current_step]
         obv_trend = self.df['obv'].iloc[self.current_step] > self.df['obv'].iloc[self.current_step - 1] if self.current_step > 0 else False
         
         # Execute trading action
@@ -99,7 +101,6 @@ class ForexTradingEnv(gym.Env):
                 self.entry_price = current_price
                 self.stop_loss = current_price - 1.5 * atr
                 self.take_profit = current_price + 2.5 * atr
-                reward = -current_price * 0.0001  # Transaction cost
                 info['trade_info'] = {
                     'action': 'buy',
                     'position_type': 'long',
@@ -115,7 +116,6 @@ class ForexTradingEnv(gym.Env):
                 self.entry_price = current_price
                 self.stop_loss = current_price + 1.5 * atr
                 self.take_profit = current_price - 2.5 * atr
-                reward = -current_price * 0.0001
                 info['trade_info'] = {
                     'action': 'sell',
                     'position_type': 'short',
@@ -124,16 +124,6 @@ class ForexTradingEnv(gym.Env):
                     'stop_loss': self.stop_loss,
                     'take_profit': self.take_profit
                 }
-        
-        # Move to next step and check if we have next data point
-        if self.current_step + 1 >= len(self.df):
-            terminated = True
-            self.current_step = len(self.df) - 1  # Keep at last valid index
-            return self._get_observation(), reward, terminated, truncated, info
-            
-        self.current_step += 1
-        next_data = self.df.iloc[self.current_step]
-        next_price = next_data['close']
         
         # Calculate reward based on position and price movement
         if self.position != 0:

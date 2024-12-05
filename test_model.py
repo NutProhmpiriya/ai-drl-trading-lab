@@ -10,9 +10,58 @@ from rl_env.forex_env import ForexTradingEnv
 def prepare_data(file_path: str) -> pd.DataFrame:
     """Prepare and preprocess the data"""
     df = pd.read_csv(file_path)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df.set_index('timestamp', inplace=True)
+    df['time'] = pd.to_datetime(df['time'])
+    df.set_index('time', inplace=True)
+    
+    # Calculate technical indicators
+    df['ema7'] = df['close'].ewm(span=7, adjust=False).mean()
+    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+    df['rsi'] = calculate_rsi(df['close'], 14)
+    df['obv'] = calculate_obv(df)
+    df['atr'] = calculate_atr(df, 14)
+    
+    # Remove NaN values
+    df = df.dropna()
+    
     return df
+
+def calculate_rsi(close_prices: pd.Series, period: int = 14) -> pd.Series:
+    """Calculate RSI technical indicator"""
+    delta = close_prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_obv(df: pd.DataFrame) -> pd.Series:
+    """Calculate On-Balance Volume (OBV)"""
+    obv = pd.Series(index=df.index, dtype=float)
+    obv.iloc[0] = df['tick_volume'].iloc[0]
+    
+    for i in range(1, len(df)):
+        if df['close'].iloc[i] > df['close'].iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] + df['tick_volume'].iloc[i]
+        elif df['close'].iloc[i] < df['close'].iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] - df['tick_volume'].iloc[i]
+        else:
+            obv.iloc[i] = obv.iloc[i-1]
+    
+    return obv
+
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Calculate Average True Range (ATR)"""
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    
+    tr1 = pd.DataFrame(high - low)
+    tr2 = pd.DataFrame(abs(high - close.shift()))
+    tr3 = pd.DataFrame(abs(low - close.shift()))
+    
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    
+    return atr
 
 def evaluate_model(model, env, n_episodes: int = 10):
     """Evaluate the trained model"""
@@ -21,14 +70,15 @@ def evaluate_model(model, env, n_episodes: int = 10):
     trades = []
     
     for episode in range(n_episodes):
-        obs, _ = env.reset()
-        done = False
+        obs, info = env.reset()
+        terminated = False
+        truncated = False
         total_reward = 0
         episode_trades = []
         
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, _, info = env.step(action)
+        while not (terminated or truncated):
+            action, _ = model.predict(obs)
+            obs, reward, terminated, truncated, info = env.step(action)
             total_reward += reward
             
             if 'trade_info' in info:
@@ -64,7 +114,7 @@ def main():
     os.makedirs("backtest_report", exist_ok=True)
     
     # Load and prepare data
-    data_path = "../data/raw/USDJPY_5M_2023.csv"
+    data_path = "data/raw/USDJPY_5M_2023.csv"
     df = prepare_data(data_path)
     
     # Use test data (last 20% of data)
@@ -72,18 +122,16 @@ def main():
     test_df = df[train_size:]
     
     # Create test environment
-    test_env = DummyVecEnv([
-        lambda: ForexTradingEnv(
-            df=test_df,
-            initial_balance=100.0,
-            leverage=1000.0,
-            max_daily_drawdown=0.05
-        )
-    ])
+    test_env = DummyVecEnv([lambda: ForexTradingEnv(
+        df=test_df,
+        initial_balance=100.0,
+        leverage=1000.0,
+        max_daily_drawdown=0.05
+    )])
     
-    # Load the latest model
-    models_dir = "models"
-    model_files = [f for f in os.listdir(models_dir) if f.startswith("trading_model_")]
+    # Load the latest model from rl_models directory
+    models_dir = "rl_models"
+    model_files = [f for f in os.listdir(models_dir) if f.startswith("forex_trading_model_")]
     if not model_files:
         print("No trained models found!")
         return

@@ -43,8 +43,8 @@ def prepare_data(file_path: str) -> pd.DataFrame:
 
 def train_model(env, total_timesteps: int = 100000, save_path: str = None):
     """Train the RL model"""
-    # Create and train DRL agent
-    agent = DRLAgent(env)
+    # Create and train DRL agent with non-vectorized environment
+    agent = DRLAgent(env=env)
     agent.train(total_timesteps=total_timesteps)
     
     # Save the trained model
@@ -83,14 +83,12 @@ def main():
     train_df = df[:train_size]
     
     # Create training environment
-    train_env = DummyVecEnv([
-        lambda: ForexTradingEnv(
-            df=train_df,
-            initial_balance=100.0,
-            leverage=1000.0,
-            max_daily_drawdown=0.05
-        )
-    ])
+    train_env = ForexTradingEnv(
+        df=train_df,
+        initial_balance=100.0,
+        leverage=1000.0,
+        max_daily_drawdown=0.05
+    )
     
     # Train model
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

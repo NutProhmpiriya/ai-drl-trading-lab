@@ -1,9 +1,6 @@
 import pandas as pd
 import numpy as np
-from ta.trend import EMAIndicator
-from ta.momentum import RSIIndicator
-from ta.volatility import AverageTrueRange
-from ta.volume import OnBalanceVolumeIndicator
+import pandas_ta as ta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -15,18 +12,24 @@ def prepare_data(file_path):
     df.set_index('time', inplace=True)
     
     # Calculate indicators
-    # EMA 5 and 13
-    df['ema5'] = EMAIndicator(close=df['close'], window=5).ema_indicator()
-    df['ema13'] = EMAIndicator(close=df['close'], window=13).ema_indicator()
+    df = calculate_indicators(df)
     
-    # RSI
-    df['rsi'] = RSIIndicator(close=df['close'], window=14).rsi()
+    return df
+
+def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate technical indicators"""
+    # Calculate EMAs
+    df['ema5'] = ta.ema(df['close'], length=5)
+    df['ema13'] = ta.ema(df['close'], length=13)
     
-    # ATR
-    df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
+    # Calculate RSI
+    df['rsi'] = ta.rsi(df['close'], length=14)
     
-    # OBV with tick_volume
-    df['obv'] = OnBalanceVolumeIndicator(close=df['close'], volume=df['tick_volume']).on_balance_volume()
+    # Calculate OBV
+    df['obv'] = ta.obv(df['close'], df['tick_volume'])
+    
+    # Calculate ATR
+    df['atr'] = ta.atr(df['high'], df['low'], df['close'], length=14)
     
     return df
 
