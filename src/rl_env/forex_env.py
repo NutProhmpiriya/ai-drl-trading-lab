@@ -55,6 +55,7 @@ class ForexTradingEnv(gym.Env):
         self.daily_start_balance = self.initial_balance
         self.position = 0
         self.last_trade_date = None
+        self.prev_balance = self.initial_balance
         self.history = []
         return self._get_observation(), {}
     
@@ -119,10 +120,7 @@ class ForexTradingEnv(gym.Env):
         # Calculate reward based on position and price movement
         if self.position != 0:
             price_change = (next_price - current_price) / current_price
-            reward = ((self.balance - self.initial_balance) / self.initial_balance) * 100
-            
-            # Add penalty for holding position too long
-            reward -= 0.001  # Small time decay
+            reward = self._calculate_reward()
             
             # Check for SL/TP
             if self.position > 0:  # Long position
@@ -158,10 +156,50 @@ class ForexTradingEnv(gym.Env):
         else:
             done = True
         
-        # Normalize reward to be between -1 and 1
-        reward = np.clip(reward / 100, -1, 1)
-        
         return self._get_observation(), reward, done, False, {}
+    
+    def _calculate_reward(self) -> float:
+        """Calculate the reward for the current step"""
+        # Get the current balance and previous balance
+        current_balance = self.balance
+        prev_balance = self.prev_balance
+        
+        # Calculate profit/loss
+        profit_loss = current_balance - prev_balance
+        
+        # Calculate drawdown
+        drawdown = (self.initial_balance - current_balance) / self.initial_balance
+        
+        # Base reward is the normalized profit/loss
+        reward = profit_loss / self.initial_balance
+        
+        # Apply penalties
+        if drawdown >= self.max_daily_drawdown:
+            # Severe penalty for exceeding max drawdown
+            reward = -1.0
+        else:
+            # Scale reward based on drawdown
+            drawdown_penalty = (drawdown / self.max_daily_drawdown) ** 2
+            reward = reward * (1 - drawdown_penalty)
+        
+        # Add small time penalty to encourage faster trading
+        time_penalty = -0.0001
+        reward += time_penalty
+        
+        # Add exploration bonus for taking positions
+        if self.position != 0:
+            # Small positive reward for having an open position
+            position_bonus = 0.0001
+            reward += position_bonus
+        else:
+            # Small negative reward for not having a position
+            inaction_penalty = -0.0001
+            reward += inaction_penalty
+        
+        # Clip reward to [-1, 1] range
+        reward = np.clip(reward, -1.0, 1.0)
+        
+        return float(reward)
     
     def _get_observation(self):
         # Check if current_step is valid
