@@ -149,12 +149,23 @@ def create_candlestick_chart(price_df, trades_df, output_file):
     print(f"Saved candlestick chart to: {output_file}")
 
 def main():
-    # Load data
-    trades_df = load_trade_data()
-    price_df = load_price_data()
+    # Get the latest trades CSV file from backtest_report directory
+    report_dir = "backtest_report"
+    trades_files = sorted([f for f in os.listdir(report_dir) if f.startswith('trades_') and f.endswith('.csv')])
+    if not trades_files:
+        raise ValueError("No trades CSV files found in backtest_report directory")
+    
+    latest_trades = os.path.join(report_dir, trades_files[-1])
+    print(f"Loading trades from: {latest_trades}")
+    
+    # Load the data
+    trades_df = pd.read_csv(latest_trades)
+    data_path = "data/raw/USDJPY_5M_2024.csv"
+    price_df = pd.read_csv(data_path)
+    price_df['time'] = pd.to_datetime(price_df['time'])
     
     # Save to the same directory as trades file
-    output_file = f"backtest_report/trades_20241205_224350.html"
+    output_file = latest_trades.replace('.csv', '.html')
     create_candlestick_chart(price_df, trades_df, output_file)
 
 if __name__ == "__main__":

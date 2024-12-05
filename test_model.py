@@ -161,18 +161,14 @@ def evaluate_model(model, env, n_episodes: int = 10):
 def main():
     # Create directories if they don't exist
     os.makedirs("backtest_report", exist_ok=True)
-    
+
     # Load and prepare data
-    data_path = "data/raw/USDJPY_5M_2023.csv"
+    data_path = "data/raw/USDJPY_5M_2024.csv"
     df = prepare_data(data_path)
-    
-    # Split data into train and test sets (80/20)
-    train_size = int(len(df) * 0.8)
-    test_df = df[train_size:]
-    
+
     # Create test environment
     test_env = ForexTradingEnv(
-        df=test_df,
+        df=df,
         initial_balance=100.0,
         leverage=1000.0,
         max_daily_drawdown=0.05
