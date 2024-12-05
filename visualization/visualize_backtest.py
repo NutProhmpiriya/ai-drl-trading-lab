@@ -20,7 +20,7 @@ def load_trade_data():
 
 def load_price_data():
     """Load price data"""
-    data_path = "data/raw/USDJPY_5M_2023.csv"
+    data_path = "data/raw/USDJPY_5M_2024.csv"
     df = pd.read_csv(data_path)
     df['time'] = pd.to_datetime(df['time'])
     return df
@@ -73,7 +73,7 @@ def create_candlestick_chart(price_df, trades_df, output_file):
                   row=2, col=1)
 
     # Process trades
-    completed_trades = trades_df[trades_df['pnl'].notna()].copy()
+    completed_trades = trades_df.dropna(subset=['pnl']).copy()
 
     # Add trade entry points
     entry_types = {
@@ -148,6 +148,65 @@ def create_candlestick_chart(price_df, trades_df, output_file):
     fig.write_html(output_file)
     print(f"Saved candlestick chart to: {output_file}")
 
+def analyze_trading_performance(trades_df):
+    """Analyze trading performance metrics"""
+    # Filter completed trades only
+    completed_trades = trades_df.dropna(subset=['pnl'])
+    
+    # Basic statistics
+    total_trades = len(completed_trades)
+    winning_trades = len(completed_trades[completed_trades['pnl'] > 0])
+    losing_trades = len(completed_trades[completed_trades['pnl'] < 0])
+    win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+    
+    # Profit analysis
+    total_profit = completed_trades['pnl'].sum()
+    avg_profit = completed_trades['pnl'].mean()
+    max_profit = completed_trades['pnl'].max()
+    max_loss = completed_trades['pnl'].min()
+    
+    # Risk metrics
+    profit_std = completed_trades['pnl'].std()
+    sharpe_ratio = avg_profit / profit_std if profit_std != 0 else 0
+    
+    # Drawdown analysis
+    cumulative_returns = completed_trades['pnl'].cumsum()
+    rolling_max = cumulative_returns.expanding().max()
+    drawdowns = cumulative_returns - rolling_max
+    max_drawdown = drawdowns.min()
+    
+    # Time analysis
+    completed_trades['exit_time'] = pd.to_datetime(completed_trades['exit_time'])
+    completed_trades['entry_time'] = pd.to_datetime(completed_trades['entry_time'])
+    avg_trade_duration = (completed_trades['exit_time'] - completed_trades['entry_time']).mean()
+    
+    # Position analysis
+    long_trades = len(completed_trades[completed_trades['position_type'] == 'long'])
+    short_trades = len(completed_trades[completed_trades['position_type'] == 'short'])
+    
+    print("\n=== Trading Performance Analysis ===")
+    print(f"Total Trades: {total_trades}")
+    print(f"Win Rate: {win_rate:.2f}%")
+    print(f"Total Profit: ${total_profit:.2f}")
+    print(f"Average Profit per Trade: ${avg_profit:.2f}")
+    print(f"Maximum Profit: ${max_profit:.2f}")
+    print(f"Maximum Loss: ${max_loss:.2f}")
+    print(f"Sharpe Ratio: {sharpe_ratio:.2f}")
+    print(f"Maximum Drawdown: ${abs(max_drawdown):.2f}")
+    print(f"Average Trade Duration: {avg_trade_duration}")
+    print(f"\nPosition Distribution:")
+    print(f"Long Trades: {long_trades} ({long_trades/total_trades*100:.1f}%)")
+    print(f"Short Trades: {short_trades} ({short_trades/total_trades*100:.1f}%)")
+    
+    return {
+        'total_trades': total_trades,
+        'win_rate': win_rate,
+        'total_profit': total_profit,
+        'avg_profit': avg_profit,
+        'max_drawdown': max_drawdown,
+        'sharpe_ratio': sharpe_ratio
+    }
+
 def main():
     # Get the latest trades CSV file from backtest_report directory
     report_dir = "backtest_report"
@@ -164,7 +223,10 @@ def main():
     price_df = pd.read_csv(data_path)
     price_df['time'] = pd.to_datetime(price_df['time'])
     
-    # Save to the same directory as trades file
+    # Analyze trading performance
+    performance_metrics = analyze_trading_performance(trades_df)
+    
+    # Create candlestick chart
     output_file = latest_trades.replace('.csv', '.html')
     create_candlestick_chart(price_df, trades_df, output_file)
 
