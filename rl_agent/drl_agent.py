@@ -3,6 +3,8 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 import torch.nn as nn
+from tqdm import tqdm
+import time
 
 from rl_env.forex_env import ForexTradingEnv
 
@@ -56,7 +58,7 @@ class DRLAgent:
                     ),
                     activation_fn=nn.ReLU
                 ),
-                "verbose": 1
+                "verbose": 0  # Set to 0 to use custom progress bar
             }
             
             # Update with custom parameters if provided
@@ -66,12 +68,39 @@ class DRLAgent:
             self.model = PPO("MlpPolicy", self.env, **default_params)
     
     def train(self, total_timesteps: int = 100000) -> None:
-        """Train the agent
+        """Train the agent with progress bar
         
         Args:
             total_timesteps: Total number of timesteps to train for
         """
-        self.model.learn(total_timesteps=total_timesteps)
+        print("\nTraining Progress:")
+        pbar = tqdm(total=total_timesteps, desc="Training", unit="steps")
+        
+        # Calculate number of iterations based on n_steps
+        n_steps = self.model.n_steps
+        iterations = total_timesteps // n_steps
+        steps_per_iter = total_timesteps // iterations
+        
+        for i in range(iterations):
+            # Train for steps_per_iter timesteps
+            self.model.learn(total_timesteps=steps_per_iter, reset_num_timesteps=False)
+            
+            # Update progress bar
+            pbar.update(steps_per_iter)
+            
+            # Add training metrics to progress bar description
+            if hasattr(self.model, 'logger') and self.model.logger is not None:
+                metrics = self.model.logger.name_to_value
+                desc = f"Training | "
+                if 'train/approx_kl' in metrics:
+                    desc += f"KL: {metrics['train/approx_kl']:.3f} | "
+                if 'train/loss' in metrics:
+                    desc += f"Loss: {metrics['train/loss']:.3f} | "
+                if 'train/policy_gradient_loss' in metrics:
+                    desc += f"PG Loss: {metrics['train/policy_gradient_loss']:.3f}"
+                pbar.set_description(desc)
+        
+        pbar.close()
     
     def save(self, save_path: str) -> None:
         """Save the trained model
