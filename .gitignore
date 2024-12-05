@@ -35,6 +35,10 @@ ENV/
 *.swp
 *.swo
 
+# Tensorboard
+tensorboard_log/
+events.out.tfevents.*
+
 # OS
 .DS_Store
 .DS_Store?
