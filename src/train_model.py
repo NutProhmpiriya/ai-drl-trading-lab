@@ -8,6 +8,7 @@ import pandas_ta as ta
 import torch.nn as nn
 
 from rl_env.forex_env import ForexTradingEnv
+from rl_agent import DRLAgent
 
 def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate technical indicators"""
@@ -42,45 +43,15 @@ def prepare_data(file_path: str) -> pd.DataFrame:
 
 def train_model(env, total_timesteps: int = 100000, save_path: str = None):
     """Train the RL model"""
-    # Create and train PPO model
-    model = PPO(
-        "MlpPolicy",
-        env,
-        learning_rate=0.00003,
-        n_steps=1024,
-        batch_size=32,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        clip_range_vf=0.2,
-        normalize_advantage=True,
-        ent_coef=0.05,  # Increased from 0.01 to encourage more exploration
-        vf_coef=1.0,
-        max_grad_norm=0.5,
-        use_sde=False,
-        sde_sample_freq=-1,
-        target_kl=None,
-        tensorboard_log="./tensorboard_log",
-        policy_kwargs=dict(
-            net_arch=dict(
-                pi=[64, 64],
-                vf=[256, 128, 64]
-            ),
-            activation_fn=nn.ReLU
-        ),
-        verbose=1
-    )
+    # Create and train DRL agent
+    agent = DRLAgent(env)
+    agent.train(total_timesteps=total_timesteps)
     
-    model.learn(
-        total_timesteps=total_timesteps,
-        progress_bar=True
-    )
-    
+    # Save the trained model
     if save_path:
-        model.save(save_path)
+        agent.save(save_path)
     
-    return model
+    return agent
 
 def main():
     # Create directories if they don't exist
@@ -126,7 +97,7 @@ def main():
     model_path = f"models/trading_model_{timestamp}"
     
     print("Starting training...")
-    model = train_model(
+    agent = train_model(
         env=train_env,
         total_timesteps=100000,
         save_path=model_path
