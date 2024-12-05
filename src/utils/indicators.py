@@ -7,6 +7,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # EMA
     df['ema_fast'] = df['close'].ewm(span=12, adjust=False).mean()
     df['ema_slow'] = df['close'].ewm(span=26, adjust=False).mean()
+    df['ema_trend'] = (df['ema_fast'] - df['ema_slow']) / df['ema_slow'] * 100
     
     # RSI
     def calculate_rsi(data, periods=14):
@@ -17,9 +18,13 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         return 100 - (100 / (1 + rs))
     
     df['rsi'] = calculate_rsi(df['close'])
+    df['rsi_ma'] = df['rsi'].rolling(window=5).mean()
+    df['rsi_trend'] = df['rsi'] - df['rsi_ma']
     
     # OBV
     df['obv'] = (np.sign(df['close'].diff()) * df['tick_volume']).fillna(0).cumsum()
+    df['obv_ma'] = df['obv'].rolling(window=20).mean()
+    df['obv_trend'] = (df['obv'] - df['obv_ma']) / df['obv_ma'] * 100
     
     # ATR
     def calculate_atr(high, low, close, period=14):
@@ -30,5 +35,9 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
         return tr.rolling(period).mean()
     
     df['atr'] = calculate_atr(df['high'], df['low'], df['close'])
+    df['atr_ratio'] = df['atr'] / df['close'] * 100
+    
+    # Volatility
+    df['volatility'] = df['close'].rolling(window=20).std() / df['close'] * 100
     
     return df.dropna()

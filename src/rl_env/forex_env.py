@@ -5,7 +5,7 @@ from gymnasium import spaces
 from datetime import datetime
 
 class ForexTradingEnv(gym.Env):
-    def __init__(self, df, initial_balance=10000, leverage=1000, max_daily_drawdown=0.05):
+    def __init__(self, df, initial_balance=100, leverage=1000, max_daily_drawdown=0.05):
         super(ForexTradingEnv, self).__init__()
         
         self.df = df
@@ -16,14 +16,35 @@ class ForexTradingEnv(gym.Env):
         self.daily_start_balance = initial_balance
         self.last_trade_date = None
         
+        # Calculate min and max values for normalization
+        price_cols = ['open', 'high', 'low', 'close']
+        self.price_min = df[price_cols].min().min()
+        self.price_max = df[price_cols].max().max()
+        self.volume_min = df['tick_volume'].min()
+        self.volume_max = df['tick_volume'].max()
+        self.indicator_mins = {
+            'ema7': df['ema7'].min(),
+            'ema21': df['ema21'].min(),
+            'rsi': df['rsi'].min(),
+            'obv': df['obv'].min(),
+            'atr': df['atr'].min()
+        }
+        self.indicator_maxs = {
+            'ema7': df['ema7'].max(),
+            'ema21': df['ema21'].max(),
+            'rsi': df['rsi'].max(),
+            'obv': df['obv'].max(),
+            'atr': df['atr'].max()
+        }
+        
         # Action space: 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
         
         # Observation space: [balance, position, price_features, technical_indicators]
         self.observation_space = spaces.Box(
-            low=-np.inf, 
-            high=np.inf, 
-            shape=(28,),  # [balance, position, OHLCV, EMA fast/slow, RSI, OBV, ATR]
+            low=-1, 
+            high=1, 
+            shape=(13,),  # [balance, position, OHLCV, ema7, ema21, rsi, obv, atr]
             dtype=np.float32
         )
         
@@ -38,6 +59,10 @@ class ForexTradingEnv(gym.Env):
         return self._get_observation(), {}
     
     def step(self, action):
+        # Check if current_step is valid
+        if self.current_step >= len(self.df):
+            return self._get_observation(), 0, True, False, {}
+
         current_data = self.df.iloc[self.current_step]
         current_price = current_data['close']
         current_date = pd.to_datetime(current_data.name).date()
@@ -47,83 +72,150 @@ class ForexTradingEnv(gym.Env):
         # Check for new trading day
         if self.last_trade_date is not None and current_date != self.last_trade_date:
             self.daily_start_balance = self.balance
+            # Reset if daily loss exceeds max drawdown
+            if (self.balance - self.daily_start_balance) / self.daily_start_balance <= -self.max_daily_drawdown:
+                done = True
+                reward = -1
+        
+        self.last_trade_date = current_date
         
         # Calculate position size based on ATR for risk management
         atr = current_data['atr']
         risk_amount = self.balance * 0.01  # Risk 1% per trade
         position_size = (risk_amount / atr) * self.leverage
         
+        # Entry conditions
+        ema_cross = current_data['ema7'] > current_data['ema21']
+        rsi = current_data['rsi']
+        obv_trend = self.df['obv'].iloc[self.current_step] > self.df['obv'].iloc[self.current_step - 1] if self.current_step > 0 else False
+        
         # Execute trading action
         if action == 1:  # Buy
-            if self.position <= 0:
+            if self.position <= 0 and ema_cross and rsi > 40 and obv_trend:
                 self.position = position_size
                 self.entry_price = current_price
-                self.stop_loss = current_price - 1.5 * atr  # 1.5 * ATR for stop loss
-                self.take_profit = current_price + 2.25 * atr  # 1.5 * 1.5 * ATR for take profit (1:1.5 ratio)
+                self.stop_loss = current_price - 1.5 * atr
+                self.take_profit = current_price + 2.5 * atr
                 reward = -current_price * 0.0001  # Transaction cost
                 
         elif action == 2:  # Sell
-            if self.position >= 0:
+            if self.position >= 0 and not ema_cross and rsi < 60 and not obv_trend:
                 self.position = -position_size
                 self.entry_price = current_price
                 self.stop_loss = current_price + 1.5 * atr
-                self.take_profit = current_price - 2.25 * atr
+                self.take_profit = current_price - 2.5 * atr
                 reward = -current_price * 0.0001
         
-        # Move to next step
+        # Move to next step and check if we have next data point
+        if self.current_step + 1 >= len(self.df):
+            done = True
+            self.current_step = len(self.df) - 1  # Keep at last valid index
+            return self._get_observation(), reward, done, False, {}
+            
         self.current_step += 1
+        next_data = self.df.iloc[self.current_step]
+        next_price = next_data['close']
         
-        # Check if we have next data point
-        if self.current_step < len(self.df):
-            next_data = self.df.iloc[self.current_step]
-            next_price = next_data['close']
+        # Calculate reward based on position and price movement
+        if self.position != 0:
+            price_change = (next_price - current_price) / current_price
+            reward = ((self.balance - self.initial_balance) / self.initial_balance) * 100
             
-            # Calculate reward based on position and price movement
-            if self.position != 0:
-                price_change = (next_price - current_price)
-                reward = self.position * price_change
+            # Add penalty for holding position too long
+            reward -= 0.001  # Small time decay
+            
+            # Check for SL/TP
+            if self.position > 0:  # Long position
+                if next_price <= self.stop_loss:
+                    reward = -1  # Fixed penalty for stop loss
+                    self.position = 0
+                elif next_price >= self.take_profit:
+                    reward = 1.5  # Fixed reward for take profit
+                    self.position = 0
+                    
+                # Update trailing stop if in profit
+                elif (next_price - self.entry_price) >= atr:
+                    new_stop = next_price - atr
+                    if new_stop > self.stop_loss:
+                        self.stop_loss = new_stop
+                        
+            else:  # Short position
+                if next_price >= self.stop_loss:
+                    reward = -1
+                    self.position = 0
+                elif next_price <= self.take_profit:
+                    reward = 1.5
+                    self.position = 0
+                    
+                # Update trailing stop if in profit
+                elif (self.entry_price - next_price) >= atr:
+                    new_stop = next_price + atr
+                    if new_stop < self.stop_loss:
+                        self.stop_loss = new_stop
                 
-                # Check for SL/TP
-                if self.position > 0:  # Long position
-                    if next_price <= self.stop_loss or next_price >= self.take_profit:
-                        reward = self.position * (next_price - self.entry_price)
-                        self.position = 0
-                else:  # Short position
-                    if next_price >= self.stop_loss or next_price <= self.take_profit:
-                        reward = self.position * (self.entry_price - next_price)
-                        self.position = 0
-            
             # Update balance
-            self.balance += reward
-            
-            # Check daily drawdown limit
-            daily_drawdown = (self.balance - self.daily_start_balance) / self.daily_start_balance
-            if daily_drawdown <= -self.max_daily_drawdown:
-                done = True
-                reward -= 100  # Penalty for exceeding daily drawdown limit
-            
+            self.balance += reward * risk_amount
         else:
             done = True
         
-        self.last_trade_date = current_date
+        # Normalize reward to be between -1 and 1
+        reward = np.clip(reward / 100, -1, 1)
+        
         return self._get_observation(), reward, done, False, {}
     
     def _get_observation(self):
-        # Get current market data
-        obs = self.df.iloc[self.current_step]
+        # Check if current_step is valid
+        if self.current_step >= len(self.df):
+            self.current_step = len(self.df) - 1  # Keep at last valid index
+            
+        current_data = self.df.iloc[self.current_step]
         
-        # Combine position, balance, and market data
-        return np.array([
-            self.balance,
-            self.position,
-            obs['open'],
-            obs['high'],
-            obs['low'],
-            obs['close'],
-            obs['tick_volume'],
-            obs['ema_fast'],
-            obs['ema_slow'],
-            obs['rsi'],
-            obs['obv'],
-            obs['atr']
+        # Helper function to safely normalize data
+        def safe_normalize(value, min_val, max_val, clip=True):
+            if np.isclose(min_val, max_val):
+                return 0.0
+            normalized = (value - min_val) / (max_val - min_val) * 2 - 1
+            if clip:
+                normalized = np.clip(normalized, -1.0, 1.0)
+            return normalized
+        
+        # Normalize the data
+        normalized_balance = np.clip(self.balance / (self.initial_balance * 2) - 1, -1.0, 1.0)
+        normalized_position = np.clip(self.position / (self.initial_balance * self.leverage), -1.0, 1.0)
+        
+        # Normalize price data
+        normalized_open = safe_normalize(current_data['open'], self.price_min, self.price_max)
+        normalized_high = safe_normalize(current_data['high'], self.price_min, self.price_max)
+        normalized_low = safe_normalize(current_data['low'], self.price_min, self.price_max)
+        normalized_close = safe_normalize(current_data['close'], self.price_min, self.price_max)
+        
+        # Normalize volume
+        normalized_volume = safe_normalize(current_data['tick_volume'], self.volume_min, self.volume_max)
+        
+        # Normalize technical indicators
+        normalized_ema7 = safe_normalize(current_data['ema7'], self.indicator_mins['ema7'], self.indicator_maxs['ema7'])
+        normalized_ema21 = safe_normalize(current_data['ema21'], self.indicator_mins['ema21'], self.indicator_maxs['ema21'])
+        normalized_rsi = safe_normalize(current_data['rsi'], self.indicator_mins['rsi'], self.indicator_maxs['rsi'])
+        normalized_obv = safe_normalize(current_data['obv'], self.indicator_mins['obv'], self.indicator_maxs['obv'])
+        normalized_atr = safe_normalize(current_data['atr'], self.indicator_mins['atr'], self.indicator_maxs['atr'])
+        
+        # Normalize daily PnL
+        normalized_daily_pnl = np.clip((self.balance - self.daily_start_balance) / self.initial_balance, -1.0, 1.0)
+        
+        obs = np.array([
+            normalized_balance,
+            normalized_position,
+            normalized_open,
+            normalized_high,
+            normalized_low,
+            normalized_close,
+            normalized_volume,
+            normalized_ema7,
+            normalized_ema21,
+            normalized_rsi,
+            normalized_obv,
+            normalized_atr,
+            normalized_daily_pnl
         ], dtype=np.float32)
+        
+        return obs
