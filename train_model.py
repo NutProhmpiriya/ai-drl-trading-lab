@@ -55,7 +55,7 @@ def train_model(env, total_timesteps: int = 100000, save_path: str = None):
 
 def main():
     # Create directories if they don't exist
-    os.makedirs("models", exist_ok=True)
+    os.makedirs("rl_models", exist_ok=True)
     os.makedirs("tensorboard_log", exist_ok=True)
     
     # Load and prepare data
@@ -94,7 +94,7 @@ def main():
     
     # Train model
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = f"models/trading_model_{timestamp}"
+    model_path = f"rl_models/forex_trading_model_{timestamp}"
     
     print("Starting training...")
     agent = train_model(

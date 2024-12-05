@@ -39,6 +39,11 @@ ENV/
 tensorboard_log/
 events.out.tfevents.*
 
+# Model directories
+models/
+rl_models/*
+!rl_models/forex_trading_model.zip
+
 # OS
 .DS_Store
 .DS_Store?
