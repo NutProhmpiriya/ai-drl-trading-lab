@@ -79,6 +79,39 @@ class ForexTradingEnv(gym.Env):
         next_price = self.df['close'].iloc[self.current_step + 1] if self.current_step + 1 < len(self.df) else current_price
         atr = self.df['atr'].iloc[self.current_step]
         
+        # Get current timestamp
+        current_time = self.df.index[self.current_step]
+        next_time = self.df.index[self.current_step + 1] if self.current_step + 1 < len(self.df) else current_time
+        
+        # Check if we're approaching weekend (Friday)
+        is_friday = current_time.weekday() == 4
+        is_friday_late = is_friday and current_time.hour >= 20  # ถ้าเป็นวันศุกร์หลัง 20:00
+        
+        # Close position if approaching weekend
+        if is_friday_late and self.position != 0:
+            # Calculate PnL and close position
+            if self.position > 0:  # Long position
+                reward = (next_price - self.entry_price) / self.entry_price
+            else:  # Short position
+                reward = (self.entry_price - next_price) / self.entry_price
+            
+            self.position = 0
+            info['trade_info'] = {
+                'action': 'weekend_close',
+                'position_type': 'long' if self.position > 0 else 'short',
+                'entry_price': self.entry_price,
+                'exit_price': next_price,
+                'pnl': reward,
+                'entry_time': self.df.index[self.current_step - 1],
+                'exit_time': current_time
+            }
+            
+            return self._get_observation(), reward, terminated, truncated, info
+        
+        # Don't open new positions on Friday after certain hour
+        if is_friday_late and action != 0:  # If trying to open position late Friday
+            action = 0  # Force to hold
+        
         # Store previous balance for reward calculation
         self.prev_balance = self.balance
         

@@ -46,7 +46,7 @@ class DRLAgent:
                 "gamma": 0.99,
                 "gae_lambda": 0.95,
                 "clip_range": 0.2,
-                "clip_range_vf": 0.2,
+                "clip_range_vf": None,  # Use same as clip_range
                 "normalize_advantage": True,
                 "ent_coef": 0.05,
                 "vf_coef": 1.0,
@@ -61,7 +61,8 @@ class DRLAgent:
                         vf=[64, 64]
                     )
                 ),
-                "verbose": 0
+                "verbose": 0,
+                "device": "auto"
             }
             
             # Update with custom parameters if provided
