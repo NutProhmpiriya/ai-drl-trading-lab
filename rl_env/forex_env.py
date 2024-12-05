@@ -5,13 +5,14 @@ from gymnasium import spaces
 from datetime import datetime
 
 class ForexTradingEnv(gym.Env):
-    def __init__(self, df, initial_balance=100, leverage=1000, max_daily_drawdown=0.05):
+    def __init__(self, df, initial_balance=100, leverage=1000, max_daily_drawdown=0.05, spread_points=2):
         super(ForexTradingEnv, self).__init__()
         
         self.df = df
         self.initial_balance = initial_balance
         self.leverage = leverage
         self.max_daily_drawdown = max_daily_drawdown
+        self.spread_points = spread_points  # Spread in points (pips * 10)
         self.current_step = 0
         self.daily_start_balance = initial_balance
         self.last_trade_date = None
@@ -79,6 +80,9 @@ class ForexTradingEnv(gym.Env):
         next_price = self.df['close'].iloc[self.current_step + 1] if self.current_step + 1 < len(self.df) else current_price
         atr = self.df['atr'].iloc[self.current_step]
         
+        # Calculate spread cost
+        spread_cost = self.spread_points * 0.00001  # Convert points to price (1 pip = 0.0001)
+        
         # Get current timestamp
         current_time = self.df.index[self.current_step]
         next_time = self.df.index[self.current_step + 1] if self.current_step + 1 < len(self.df) else current_time
@@ -133,31 +137,33 @@ class ForexTradingEnv(gym.Env):
         if action == 1:  # Buy
             if self.position <= 0 and ema_cross and rsi > 40 and obv_trend:
                 self.position = position_size
-                self.entry_price = current_price
-                self.stop_loss = current_price - 1.5 * atr
-                self.take_profit = current_price + 2.5 * atr
+                self.entry_price = current_price + spread_cost  # Add spread cost to entry
+                self.stop_loss = self.entry_price - 1.5 * atr
+                self.take_profit = self.entry_price + 2.5 * atr
                 info['trade_info'] = {
                     'action': 'buy',
                     'position_type': 'long',
                     'entry_price': self.entry_price,
                     'entry_time': self.df.index[self.current_step],
                     'stop_loss': self.stop_loss,
-                    'take_profit': self.take_profit
+                    'take_profit': self.take_profit,
+                    'spread_cost': spread_cost
                 }
                 
         elif action == 2:  # Sell
             if self.position >= 0 and not ema_cross and rsi < 60 and not obv_trend:
                 self.position = -position_size
-                self.entry_price = current_price
-                self.stop_loss = current_price + 1.5 * atr
-                self.take_profit = current_price - 2.5 * atr
+                self.entry_price = current_price - spread_cost  # Subtract spread cost from entry
+                self.stop_loss = self.entry_price + 1.5 * atr
+                self.take_profit = self.entry_price - 2.5 * atr
                 info['trade_info'] = {
                     'action': 'sell',
                     'position_type': 'short',
                     'entry_price': self.entry_price,
                     'entry_time': self.df.index[self.current_step],
                     'stop_loss': self.stop_loss,
-                    'take_profit': self.take_profit
+                    'take_profit': self.take_profit,
+                    'spread_cost': spread_cost
                 }
         
         # Calculate reward based on position and price movement

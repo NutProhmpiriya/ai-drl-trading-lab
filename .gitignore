@@ -44,6 +44,12 @@ models/
 rl_models/*
 !rl_models/forex_trading_model.zip
 
+# Database
+*.db
+
+# Backtest reports
+backtest_report/
+
 # OS
 .DS_Store
 .DS_Store?
