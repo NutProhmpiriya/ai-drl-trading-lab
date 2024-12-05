@@ -7,13 +7,16 @@ from datetime import datetime
 def load_trade_data():
     """Load the latest trade report from backtest_report directory"""
     report_dir = "backtest_report"
-    trade_files = sorted([f for f in os.listdir(report_dir) if f.startswith('trades_')])
+    trade_files = sorted([f for f in os.listdir(report_dir) if f.startswith('trades_') and f.endswith('.csv')])
     if not trade_files:
         raise ValueError("No trade report files found")
     
     latest_file = os.path.join(report_dir, trade_files[-1])
     print(f"Loading trade data from: {latest_file}")
-    return pd.read_csv(latest_file)
+    
+    # Read CSV with explicit parsing of datetime columns
+    trades_df = pd.read_csv(latest_file, parse_dates=['entry_time', 'exit_time'])
+    return trades_df
 
 def load_price_data():
     """Load price data"""
@@ -32,7 +35,7 @@ def create_candlestick_chart(price_df, trades_df, output_file):
     fig = make_subplots(rows=2, cols=1, 
                        shared_xaxes=True,
                        vertical_spacing=0.03,
-                       row_heights=[0.7, 0.3])
+                       row_heights=[0.75, 0.25])
 
     # Add candlestick
     fig.add_trace(go.Candlestick(x=price_df['time'],
@@ -57,17 +60,20 @@ def create_candlestick_chart(price_df, trades_df, output_file):
                   row=1, col=1)
 
     # Add volume
-    colors = ['red' if row['open'] > row['close'] else 'green' for index, row in price_df.iterrows()]
+    colors = ['rgba(255,82,82,0.8)' if row['open'] > row['close'] else 'rgba(76,175,80,0.8)' 
+             for index, row in price_df.iterrows()]
+    
     fig.add_trace(go.Bar(x=price_df['time'],
                         y=price_df['tick_volume'],
-                        marker_color=colors,
+                        marker=dict(
+                            color=colors,
+                            line=dict(color=colors, width=1)
+                        ),
                         name='Volume'),
                   row=2, col=1)
 
     # Process trades
     completed_trades = trades_df[trades_df['pnl'].notna()].copy()
-    completed_trades['entry_time'] = pd.to_datetime(completed_trades['entry_time'])
-    completed_trades['exit_time'] = pd.to_datetime(completed_trades['exit_time'])
 
     # Add trade entry points
     entry_types = {
@@ -127,7 +133,7 @@ def create_candlestick_chart(price_df, trades_df, output_file):
         yaxis_title='Price',
         yaxis2_title='Volume',
         xaxis_rangeslider_visible=False,
-        height=1000,
+        height=1200,
         legend=dict(
             yanchor="top",
             y=0.99,
@@ -146,9 +152,6 @@ def main():
     # Load data
     trades_df = load_trade_data()
     price_df = load_price_data()
-
-    # Create output directory if it doesn't exist
-    trades_filename = os.path.basename(os.path.dirname(trades_df['entry_time'].iloc[0]))
     
     # Save to the same directory as trades file
     output_file = f"backtest_report/trades_20241205_224350.html"
