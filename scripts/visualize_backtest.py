@@ -27,6 +27,9 @@ def load_price_data():
 
 def create_candlestick_chart(price_df, trades_df, output_file):
     """Create candlestick chart with indicators and trade points"""
+    # Convert time column to datetime
+    price_df['time'] = pd.to_datetime(price_df['time'])
+    
     # Calculate indicators
     price_df['ema7'] = price_df['close'].ewm(span=7, adjust=False).mean()
     price_df['ema21'] = price_df['close'].ewm(span=21, adjust=False).mean()
@@ -59,18 +62,7 @@ def create_candlestick_chart(price_df, trades_df, output_file):
                             name='EMA 21'),
                   row=1, col=1)
 
-    # Add volume
-    colors = ['rgba(255,82,82,0.8)' if row['open'] > row['close'] else 'rgba(76,175,80,0.8)' 
-             for index, row in price_df.iterrows()]
-    
-    fig.add_trace(go.Bar(x=price_df['time'],
-                        y=price_df['tick_volume'],
-                        marker=dict(
-                            color=colors,
-                            line=dict(color=colors, width=1)
-                        ),
-                        name='Volume'),
-                  row=2, col=1)
+ 
 
     # Process trades
     completed_trades = trades_df.dropna(subset=['pnl']).copy()
@@ -134,6 +126,16 @@ def create_candlestick_chart(price_df, trades_df, output_file):
         yaxis2_title='Volume',
         xaxis_rangeslider_visible=False,
         height=1200,
+        xaxis=dict(
+            type='date',
+            tickformat='%Y-%m-%d %H:%M',
+            showgrid=True,
+            gridcolor='LightGray',
+            tickangle=45,
+            dtick='H1',  # Show tick every hour
+            tickmode='auto',
+            nticks=20
+        ),
         legend=dict(
             yanchor="top",
             y=0.99,
